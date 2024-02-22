@@ -24,6 +24,8 @@ jobs:
     - run: |
         go get github.com/jonlil/loopia-go
         git add go.mod go.sum
+        git config user.email "johannes@sundqvist.io"
+        git config user.name "Johannes Sundqvist"
         git commit -m "go get github.com/jonlil/loopia-go"
         git push
 
