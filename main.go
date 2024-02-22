@@ -10,6 +10,7 @@ import (
 
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
+	loopia "github.com/jonlil/loopia-go"
 )
 
 var GroupName = os.Getenv("GROUP_NAME")
