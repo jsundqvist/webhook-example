@@ -27,7 +27,7 @@ jobs:
         git config user.email "johannes@sundqvist.io"
         git config user.name "Johannes Sundqvist"
         git commit -m "go get github.com/jonlil/loopia-go"
-        git push
+        git push origin HEAD:jsundqvist-patch-1
 
     - name: Build
       run: go build -v ./...
