@@ -4,11 +4,11 @@ go 1.20
 
 require (
 	github.com/cert-manager/cert-manager v1.12.6
+	github.com/jonlil/loopia-go v0.0.0-20220617090554-b07b4c905b28
 	github.com/miekg/dns v1.1.50
 	github.com/stretchr/testify v1.8.4
 	k8s.io/apiextensions-apiserver v0.27.2
 	k8s.io/client-go v0.27.2
-	github.com/jonlil/loopia-go v0.0.0-20220617090554-b07b4c905b28
 )
 
 require (
@@ -47,6 +47,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kolo/xmlrpc v0.0.0-20220921171641-a4b6fa1dd06b // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
