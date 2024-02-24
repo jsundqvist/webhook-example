@@ -1,9 +1,9 @@
 {
-    "usernameSecretKeyRef": {
+    "usernameSecretRef": {
         "name": "loopia-credentials",
         "key": "username"
     },
-    "passwordSecretKeyRef": {
+    "passwordSecretRef": {
         "name": "loopia-credentials",
         "key": "password"
     }

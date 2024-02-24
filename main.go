@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
-	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog"
@@ -15,6 +17,10 @@ import (
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
 	loopia "github.com/jonlil/loopia-go"
+)
+
+const (
+	LoopiaMinTtl = 300 // Loopia requires a TTL of minimum 300 sec.
 )
 
 var GroupName = os.Getenv("GROUP_NAME")
@@ -65,8 +71,14 @@ type customDNSProviderConfig struct {
 	// These fields will be set by users in the
 	// `issuer.spec.acme.dns01.providers.webhook.config` field.
 
-	Username          string                     `json:"username"`
-	PasswordSecretRef v1alpha1.SecretKeySelector `json:"passwordSecretRef"`
+	UsernameSecretRef cmmeta.SecretKeySelector `json:"usernameSecretRef"`
+	PasswordSecretRef cmmeta.SecretKeySelector `json:"passwordSecretRef"`
+}
+
+// Type holding credential.
+type credential struct {
+	Username string
+	Password string
 }
 
 // Name is used as the name for this DNS solver when referencing it on the ACME
@@ -115,7 +127,8 @@ func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 		// Exit if record is already present by type and value.
 		for _, zoneRecord := range zoneRecords {
 			if zoneRecord.Type == "TXT" && zoneRecord.Value == ch.Key {
-				return fmt.Printf("Both TXT-record and value is present already, leaving")
+				fmt.Printf("Both TXT-record and value is present already, leaving")
+				return nil
 			}
 		}
 	}
@@ -207,7 +220,7 @@ func (c *customDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stop
 	if err != nil {
 		return fmt.Errorf("unable to get k8s client: %v", err)
 	}
-	c.client = cl
+	c.client = *cl
 	return nil
 }
 
@@ -227,7 +240,7 @@ func loadConfig(cfgJSON *extapi.JSON) (customDNSProviderConfig, error) {
 }
 
 // Split and format domain and sub domain values.
-func (c *loopiaDNSProviderSolver) getDomainAndSubdomain(ch *v1alpha1.ChallengeRequest) (string, string) {
+func (c *customDNSProviderSolver) getDomainAndSubdomain(ch *v1alpha1.ChallengeRequest) (string, string) {
 	// ch.ResolvedZone form: example.com.
 	// ch.ResolvedFQDN form:  _acme-challenge.example.com.
 	// Both ch.ResolvedZone and ch.ResolvedFQDN end with a dot: '.'
@@ -238,31 +251,31 @@ func (c *loopiaDNSProviderSolver) getDomainAndSubdomain(ch *v1alpha1.ChallengeRe
 }
 
 // Get Loopia API credentials from Kubernetes secret.
-func (c *loopiaDNSProviderSolver) getCredentials(cfg *loopiaDNSProviderConfig, namespace string) (*credential, error) {
+func (c *customDNSProviderSolver) getCredentials(cfg *customDNSProviderConfig, namespace string) (*credential, error) {
 	creds := credential{}
 
 	// Get Username.
-	fmt.Printf("Trying to load secret `%s` with key `%s`", cfg.UsernameSecretKeyRef.Name, cfg.UsernameSecretKeyRef.Key)
-	usernameSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.UsernameSecretKeyRef.Name, metav1.GetOptions{})
+	fmt.Printf("Trying to load secret `%s` with key `%s`", cfg.UsernameSecretRef.Name, cfg.UsernameSecretRef.Key)
+	usernameSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.UsernameSecretRef.Name, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.UsernameSecretKeyRef.Name, err.Error())
+		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.UsernameSecretRef.Name, err.Error())
 	}
-	if username, ok := usernameSecret.Data[cfg.UsernameSecretKeyRef.Key]; ok {
+	if username, ok := usernameSecret.Data[cfg.UsernameSecretRef.Key]; ok {
 		creds.Username = string(username)
 	} else {
-		return nil, fmt.Errorf("no key %q in secret %q", cfg.UsernameSecretKeyRef, namespace+"/"+cfg.UsernameSecretKeyRef.Name)
+		return nil, fmt.Errorf("no key %q in secret %q", cfg.UsernameSecretRef, namespace+"/"+cfg.UsernameSecretRef.Name)
 	}
 
 	// Get Password.
-	fmt.Printf("Trying to load secret `%s` with key `%s`", cfg.PasswordSecretKeyRef.Name, cfg.PasswordSecretKeyRef.Key)
-	passwordSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.PasswordSecretKeyRef.Name, metav1.GetOptions{})
+	fmt.Printf("Trying to load secret `%s` with key `%s`", cfg.PasswordSecretRef.Name, cfg.PasswordSecretRef.Key)
+	passwordSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.PasswordSecretRef.Name, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.PasswordSecretKeyRef.Name, err.Error())
+		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.PasswordSecretRef.Name, err.Error())
 	}
-	if password, ok := passwordSecret.Data[cfg.PasswordSecretKeyRef.Key]; ok {
+	if password, ok := passwordSecret.Data[cfg.PasswordSecretRef.Key]; ok {
 		creds.Password = string(password)
 	} else {
-		return nil, fmt.Errorf("no key %q in secret %q", cfg.PasswordSecretKeyRef, namespace+"/"+cfg.PasswordSecretKeyRef.Name)
+		return nil, fmt.Errorf("no key %q in secret %q", cfg.PasswordSecretRef, namespace+"/"+cfg.PasswordSecretRef.Name)
 	}
 
 	return &creds, nil

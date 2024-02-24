@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	acmetest "github.com/cert-manager/cert-manager/test/acme"
-
-	"github.com/cert-manager/webhook-example/example"
 )
 
 var (
@@ -24,7 +22,6 @@ func TestRunsSuite(t *testing.T) {
 		acmetest.SetResolvedZone(zone),
 		acmetest.SetAllowAmbientCredentials(false),
 		acmetest.SetManifestPath("testdata/loopia"),
-		acmetest.SetBinariesPath("_test/kubebuilder/bin"),
 	)
 	//need to uncomment and  RunConformance delete runBasic and runExtended once https://github.com/cert-manager/cert-manager/pull/4835 is merged
 	//fixture.RunConformance(t)
