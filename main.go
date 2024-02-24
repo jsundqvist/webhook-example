@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
-	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/client-go/rest"
+	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/klog"
 
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
@@ -62,7 +65,7 @@ type customDNSProviderConfig struct {
 	// These fields will be set by users in the
 	// `issuer.spec.acme.dns01.providers.webhook.config` field.
 
-	Username           string `json:"username"`
+	Username          string                     `json:"username"`
 	PasswordSecretRef v1alpha1.SecretKeySelector `json:"passwordSecretRef"`
 }
 
@@ -102,8 +105,8 @@ func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 
 	zoneRecords, err := loopiaClient.GetZoneRecords(domain, subdomain)
 
-//	
-	
+	//
+
 	if err != nil {
 		fmt.Printf("Subdomain %s is not present, needs to be created", subdomain)
 	} else {
@@ -151,7 +154,7 @@ func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 	if err != nil {
 		return err
 	}
-	
+
 	creds, err := c.getCredentials(&cfg, ch.ResourceNamespace)
 	if err != nil {
 		return fmt.Errorf("unable to get credential: %v", err)
@@ -161,14 +164,14 @@ func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 	if err != nil {
 		return fmt.Errorf("could not initialize loopia client: %v", err)
 	}
-	
+
 	subdomain, domain := c.getDomainAndSubdomain(ch)
 	fmt.Printf("Cleanup for subdomain=%s, domain=%s", subdomain, domain)
 
 	zoneRecords, err := loopiaClient.GetZoneRecords(domain, subdomain)
-	
-//
-	
+
+	//
+
 	if err != nil {
 		return fmt.Errorf("unable to get zone records: %v", err)
 	}
