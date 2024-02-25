@@ -113,21 +113,21 @@ func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	}
 
 	subdomain, domain := c.getDomainAndSubdomain(ch)
-	fmt.Printf("Extracted subdomain=%s and domain=%s", subdomain, domain)
+	klog.V(2).Infof("Extracted  subdomain=%s and domain=%s", subdomain, domain)
 
 	zoneRecords, err := loopiaClient.GetZoneRecords(domain, subdomain)
 
 	//
 
 	if err != nil {
-		fmt.Printf("Subdomain %s is not present, needs to be created", subdomain)
+		klog.V(2).Infof("Subdomain %s is not present, needs to be created", subdomain)
 	} else {
-		fmt.Printf("Subdomain %s is already present, checking if txt-record is present.", subdomain)
+		klog.V(2).Infof("Subdomain %s is already present, checking if txt-record is present.", subdomain)
 
 		// Exit if record is already present by type and value.
 		for _, zoneRecord := range zoneRecords {
 			if zoneRecord.Type == "TXT" && zoneRecord.Value == ch.Key {
-				fmt.Printf("Both TXT-record and value is present already, leaving")
+				klog.V(2).Infof("Both TXT-record and value is present already, leaving")
 				return nil
 			}
 		}
@@ -179,7 +179,7 @@ func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 	}
 
 	subdomain, domain := c.getDomainAndSubdomain(ch)
-	fmt.Printf("Cleanup for subdomain=%s, domain=%s", subdomain, domain)
+	klog.V(2).Infof("Cleanup for subdomain=%s, domain=%s", subdomain, domain)
 
 	zoneRecords, err := loopiaClient.GetZoneRecords(domain, subdomain)
 
@@ -255,7 +255,7 @@ func (c *customDNSProviderSolver) getCredentials(cfg *customDNSProviderConfig, n
 	creds := credential{}
 
 	// Get Username.
-	fmt.Printf("Trying to load secret `%s` with key `%s`", cfg.UsernameSecretRef.Name, cfg.UsernameSecretRef.Key)
+	klog.V(2).Infof("Trying to load secret `%s` with key `%s`", cfg.UsernameSecretRef.Name, cfg.UsernameSecretRef.Key)
 	usernameSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.UsernameSecretRef.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.UsernameSecretRef.Name, err.Error())
@@ -267,7 +267,7 @@ func (c *customDNSProviderSolver) getCredentials(cfg *customDNSProviderConfig, n
 	}
 
 	// Get Password.
-	fmt.Printf("Trying to load secret `%s` with key `%s`", cfg.PasswordSecretRef.Name, cfg.PasswordSecretRef.Key)
+	klog.V(2).Infof("Trying to load secret `%s` with key `%s`", cfg.PasswordSecretRef.Name, cfg.PasswordSecretRef.Key)
 	passwordSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.PasswordSecretRef.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.PasswordSecretRef.Name, err.Error())
