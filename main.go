@@ -1,15 +1,26 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog"
 
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
+	loopia "github.com/jonlil/loopia-go"
+)
+
+const (
+	LoopiaMinTtl = 300 // Loopia requires a TTL of minimum 300 sec.
 )
 
 var GroupName = os.Getenv("GROUP_NAME")
@@ -35,12 +46,9 @@ func main() {
 // interface.
 type customDNSProviderSolver struct {
 	// If a Kubernetes 'clientset' is needed, you must:
-	// 1. uncomment the additional `client` field in this structure below
-	// 2. uncomment the "k8s.io/client-go/kubernetes" import at the top of the file
-	// 3. uncomment the relevant code in the Initialize method below
 	// 4. ensure your webhook's service account has the required RBAC role
 	//    assigned to it for interacting with the Kubernetes APIs you need.
-	//client kubernetes.Clientset
+	client kubernetes.Clientset
 }
 
 // customDNSProviderConfig is a structure that is used to decode into when
@@ -63,8 +71,14 @@ type customDNSProviderConfig struct {
 	// These fields will be set by users in the
 	// `issuer.spec.acme.dns01.providers.webhook.config` field.
 
-	//Email           string `json:"email"`
-	//APIKeySecretRef v1alpha1.SecretKeySelector `json:"apiKeySecretRef"`
+	UsernameSecretRef cmmeta.SecretKeySelector `json:"usernameSecretRef"`
+	PasswordSecretRef cmmeta.SecretKeySelector `json:"passwordSecretRef"`
+}
+
+// Type holding credential.
+type credential struct {
+	Username string
+	Password string
 }
 
 // Name is used as the name for this DNS solver when referencing it on the ACME
@@ -74,7 +88,7 @@ type customDNSProviderConfig struct {
 // within a single webhook deployment**.
 // For example, `cloudflare` may be used as the name of a solver.
 func (c *customDNSProviderSolver) Name() string {
-	return "loopia-solver"
+	return "loopia"
 }
 
 // Present is responsible for actually presenting the DNS record with the
@@ -85,13 +99,60 @@ func (c *customDNSProviderSolver) Name() string {
 func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to load config: %v", err)
 	}
 
-	// TODO: do something more useful with the decoded configuration
-	fmt.Printf("Decoded configuration %v", cfg)
+	creds, err := c.getCredentials(&cfg, ch.ResourceNamespace)
+	if err != nil {
+		return fmt.Errorf("unable to get credential: %v", err)
+	}
 
-	// TODO: add code that sets a record in the DNS provider's console
+	loopiaClient, err := loopia.New(creds.Username, creds.Password)
+	if err != nil {
+		return fmt.Errorf("could not initialize Loopia client: %v", err)
+	}
+
+	subdomain, domain := c.getDomainAndSubdomain(ch)
+	klog.V(2).Infof("Extracted  subdomain=%s and domain=%s", subdomain, domain)
+
+	zoneRecords, err := loopiaClient.GetZoneRecords(domain, subdomain)
+
+	//
+
+	if err != nil {
+		klog.V(2).Infof("Subdomain %s is not present, needs to be created", subdomain)
+	} else {
+		klog.V(2).Infof("Subdomain %s is already present, checking if txt-record is present.", subdomain)
+
+		// Exit if record is already present by type and value.
+		for _, zoneRecord := range zoneRecords {
+			if zoneRecord.Type == "TXT" && zoneRecord.Value == ch.Key {
+				klog.V(2).Infof("Both TXT-record and value is present already, leaving")
+				return nil
+			}
+		}
+	}
+
+	record := loopia.Record{
+		TTL:      LoopiaMinTtl,
+		Type:     "TXT",
+		Value:    ch.Key,
+		Priority: 0,
+	}
+
+	err = loopiaClient.AddZoneRecord(domain, subdomain, &record)
+	if err != nil {
+		return fmt.Errorf("unable to create txt-record: %v", err)
+	} else {
+
+		// Verify the record has been created by checking it's id.
+		if record.ID != 0 {
+			klog.V(2).Infof("Successfully created txt-record in %s subdomain", subdomain)
+		} else {
+			return fmt.Errorf("unexpected error: txt-record was not created: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -102,7 +163,46 @@ func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 // This is in order to facilitate multiple DNS validations for the same domain
 // concurrently.
 func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
-	// TODO: add code that deletes a record from the DNS provider's console
+	cfg, err := loadConfig(ch.Config)
+	if err != nil {
+		return err
+	}
+
+	creds, err := c.getCredentials(&cfg, ch.ResourceNamespace)
+	if err != nil {
+		return fmt.Errorf("unable to get credential: %v", err)
+	}
+
+	loopiaClient, err := loopia.New(creds.Username, creds.Password)
+	if err != nil {
+		return fmt.Errorf("could not initialize loopia client: %v", err)
+	}
+
+	subdomain, domain := c.getDomainAndSubdomain(ch)
+	klog.V(2).Infof("Cleanup for subdomain=%s, domain=%s", subdomain, domain)
+
+	zoneRecords, err := loopiaClient.GetZoneRecords(domain, subdomain)
+
+	//
+
+	if err != nil {
+		return fmt.Errorf("unable to get zone records: %v", err)
+	}
+	for _, zoneRecord := range zoneRecords {
+		if zoneRecord.Type == "TXT" && zoneRecord.Value == ch.Key {
+			_, err := loopiaClient.RemoveZoneRecord(domain, subdomain, zoneRecord.ID)
+			if err != nil {
+				return fmt.Errorf("unable to delete TXT record: %v", err)
+			}
+		}
+	}
+	if len(zoneRecords) <= 1 {
+		_, err := loopiaClient.RemoveSubDomain(domain, subdomain)
+		if err != nil {
+			return fmt.Errorf("unable to remove subdomain: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -116,17 +216,11 @@ func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 // The stopCh can be used to handle early termination of the webhook, in cases
 // where a SIGTERM or similar signal is sent to the webhook process.
 func (c *customDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
-	///// UNCOMMENT THE BELOW CODE TO MAKE A KUBERNETES CLIENTSET AVAILABLE TO
-	///// YOUR CUSTOM DNS PROVIDER
-
-	//cl, err := kubernetes.NewForConfig(kubeClientConfig)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//c.client = cl
-
-	///// END OF CODE TO MAKE KUBERNETES CLIENTSET AVAILABLE
+	cl, err := kubernetes.NewForConfig(kubeClientConfig)
+	if err != nil {
+		return fmt.Errorf("unable to get k8s client: %v", err)
+	}
+	c.client = *cl
 	return nil
 }
 
@@ -143,4 +237,46 @@ func loadConfig(cfgJSON *extapi.JSON) (customDNSProviderConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// Split and format domain and sub domain values.
+func (c *customDNSProviderSolver) getDomainAndSubdomain(ch *v1alpha1.ChallengeRequest) (string, string) {
+	// ch.ResolvedZone form: example.com.
+	// ch.ResolvedFQDN form:  _acme-challenge.example.com.
+	// Both ch.ResolvedZone and ch.ResolvedFQDN end with a dot: '.'
+	subDomain := strings.TrimSuffix(ch.ResolvedFQDN, ch.ResolvedZone)
+	subDomain = strings.TrimSuffix(subDomain, ".")
+	domain := strings.TrimSuffix(ch.ResolvedZone, ".")
+	return subDomain, domain
+}
+
+// Get Loopia API credentials from Kubernetes secret.
+func (c *customDNSProviderSolver) getCredentials(cfg *customDNSProviderConfig, namespace string) (*credential, error) {
+	creds := credential{}
+
+	// Get Username.
+	klog.V(2).Infof("Trying to load secret `%s` with key `%s`", cfg.UsernameSecretRef.Name, cfg.UsernameSecretRef.Key)
+	usernameSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.UsernameSecretRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.UsernameSecretRef.Name, err.Error())
+	}
+	if username, ok := usernameSecret.Data[cfg.UsernameSecretRef.Key]; ok {
+		creds.Username = string(username)
+	} else {
+		return nil, fmt.Errorf("no key %q in secret %q", cfg.UsernameSecretRef, namespace+"/"+cfg.UsernameSecretRef.Name)
+	}
+
+	// Get Password.
+	klog.V(2).Infof("Trying to load secret `%s` with key `%s`", cfg.PasswordSecretRef.Name, cfg.PasswordSecretRef.Key)
+	passwordSecret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), cfg.PasswordSecretRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to load secret %q: %s", namespace+"/"+cfg.PasswordSecretRef.Name, err.Error())
+	}
+	if password, ok := passwordSecret.Data[cfg.PasswordSecretRef.Key]; ok {
+		creds.Password = string(password)
+	} else {
+		return nil, fmt.Errorf("no key %q in secret %q", cfg.PasswordSecretRef, namespace+"/"+cfg.PasswordSecretRef.Name)
+	}
+
+	return &creds, nil
 }
