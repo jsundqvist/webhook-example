@@ -88,7 +88,7 @@ type credential struct {
 // within a single webhook deployment**.
 // For example, `cloudflare` may be used as the name of a solver.
 func (c *customDNSProviderSolver) Name() string {
-	return "loopia-solver"
+	return "loopia"
 }
 
 // Present is responsible for actually presenting the DNS record with the
