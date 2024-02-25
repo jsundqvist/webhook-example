@@ -6,8 +6,10 @@ name: Conformance
 on:
   push:
     branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
+    paths:
+      - "**.go"
+      - "**.mod"
+      - "**.sum"
 
 jobs:
 
