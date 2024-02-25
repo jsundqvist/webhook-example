@@ -20,4 +20,4 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         push: true
-        tags: ghcr.io/jsundqvist/cert-manager-webhook-loopia:latest
+        tags: ghcr.io/jsundqvist/webhook-example:latest
